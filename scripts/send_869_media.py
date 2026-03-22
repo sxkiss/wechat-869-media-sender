@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 @input: ~/.openclaw/credentials/wechat-869.json（baseUrl/key）；869 HTTP API（/message/*、/other/*）；可选 ffmpeg（用于从视频抽帧生成封面）；可选 pillow（用于将封面归一为 240x160 JPEG）；可选 sidecar 图片（与视频同目录的 jpg/png）
-@output: CLI 脚本：发送图片/视频/语音（音乐=语音）/链接/文件（附件），stdout 输出响应 JSON
+@output: CLI 脚本：发送图片/视频/语音/音乐卡片/链接/文件（附件），stdout 输出响应 JSON
 @position: OpenClaw skill wechat-869-media-sender 的可执行入口（非文本媒体发送）
 @auto-doc: Update header and folder INDEX.md when this file changes
 """
@@ -269,6 +269,109 @@ def send_file(cfg: ClientConfig, *, to_wxid: str, file_path: Path, file_name: st
     resolved_name = (file_name or _pick_first(info, "fileName", "FileName") or file_path.name).strip()
     xml_payload = build_file_appmsg_xml(file_name=resolved_name, total_len=total_len, media_id=media_id)
     return send_app_message(cfg, to_wxid=to_wxid, content_xml=xml_payload, content_type=6)
+
+
+def build_music_appmsg_xml(
+    *,
+    title: str,
+    singer: str,
+    jump_url: str,
+    music_url: str,
+    cover_url: str,
+    lyric: str,
+    card_type: str,
+    from_wxid: str,
+) -> str:
+    title_xml = xml_escape(title or "")
+    singer_xml = xml_escape(singer or "")
+    jump_url_xml = xml_escape(jump_url or "")
+    music_url_xml = xml_escape(music_url or "")
+    cover_url_xml = xml_escape(cover_url or "")
+    lyric_xml = xml_escape(lyric or "")
+    from_wxid_xml = xml_escape(from_wxid or "")
+    normalized = (card_type or "摇一摇搜歌").strip()
+
+    if normalized == "原卡片":
+        appid = "wx79f2c4418704b4f8"
+        app_version = "1"
+        app_name = ""
+        appmsg = (
+            f"<appmsg appid=\"{appid}\" sdkver=\"0\">"
+            f"<title>{title_xml}</title>"
+            f"<des>{singer_xml}</des>"
+            "<action>view</action>"
+            "<type>3</type><showtype>0</showtype><content/>"
+            f"<url>{jump_url_xml}</url>"
+            f"<dataurl>{music_url_xml}</dataurl>"
+            f"<lowurl>{jump_url_xml}</lowurl>"
+            f"<lowdataurl>{music_url_xml}</lowdataurl>"
+            "<recorditem/><thumburl/><messageaction/><laninfo/><extinfo/><sourceusername/><sourcedisplayname/>"
+            f"<songlyric>{lyric_xml}</songlyric>"
+            "<commenturl/>"
+            "<appattach><totallen>0</totallen><attachid/><emoticonmd5/><fileext/><aeskey/></appattach>"
+            "<webviewshared><publisherId/><publisherReqId>0</publisherReqId></webviewshared>"
+            "<weappinfo><pagepath/><username/><appid/><appservicetype>0</appservicetype></weappinfo>"
+            f"<websearch/><songalbumurl>{cover_url_xml}</songalbumurl>"
+            "</appmsg>"
+        )
+    else:
+        appid = "wx485a97c844086dc9"
+        app_version = "29"
+        app_name = "摇一摇搜歌"
+        appmsg = (
+            f"<appmsg appid=\"{appid}\" sdkver=\"0\">"
+            f"<title>{title_xml}</title>"
+            f"<des>{singer_xml}</des>"
+            "<action>view</action>"
+            "<type>3</type><showtype>0</showtype><content/>"
+            f"<url>{jump_url_xml}</url>"
+            f"<dataurl>{music_url_xml}</dataurl>"
+            f"<lowurl>{jump_url_xml}</lowurl>"
+            f"<lowdataurl>{music_url_xml}</lowdataurl>"
+            "<thumburl/>"
+            f"<songlyric>{lyric_xml}</songlyric>"
+            f"<songalbumurl>{cover_url_xml}</songalbumurl>"
+            "<appattach><totallen>0</totallen><attachid/><emoticonmd5/><fileext/><aeskey/></appattach>"
+            "<weappinfo><pagepath/><username/><appid/><appservicetype>0</appservicetype></weappinfo>"
+            "</appmsg>"
+        )
+
+    tail = (
+        f"<fromusername>{from_wxid_xml}</fromusername>"
+        "<scene>0</scene>"
+        "<appinfo>"
+        f"<version>{app_version}</version>"
+        f"<appname>{xml_escape(app_name)}</appname>"
+        "</appinfo>"
+        "<commenturl/>"
+    )
+    return appmsg + tail
+
+
+def send_music_card(
+    cfg: ClientConfig,
+    *,
+    to_wxid: str,
+    title: str,
+    singer: str,
+    jump_url: str,
+    music_url: str,
+    cover_url: str,
+    lyric: str,
+    card_type: str,
+    from_wxid: str,
+) -> Any:
+    xml_payload = build_music_appmsg_xml(
+        title=title,
+        singer=singer,
+        jump_url=jump_url,
+        music_url=music_url,
+        cover_url=cover_url,
+        lyric=lyric,
+        card_type=card_type,
+        from_wxid=from_wxid,
+    )
+    return send_app_message(cfg, to_wxid=to_wxid, content_xml=xml_payload, content_type=3)
 
 
 def send_voice(cfg: ClientConfig, *, to_wxid: str, voice_path: Path, fmt: str, seconds: int) -> Any:
@@ -585,11 +688,22 @@ def build_parser() -> argparse.ArgumentParser:
     p_voice.add_argument("--format", default="amr", choices=["amr", "wav", "mp3"], help="语音格式（默认 amr）")
     p_voice.add_argument("--seconds", type=int, default=2, help="语音时长（秒，默认 2）")
 
-    p_music = sub.add_parser("send-music", help="发送音乐（按约定：等价语音发送）")
+    p_music = sub.add_parser("send-music", help="发送音乐（兼容旧约定：等价语音发送）")
     p_music.add_argument("--to", required=True, help="接收人 wxid（群聊一般以 @chatroom 结尾）")
     p_music.add_argument("--path", required=True, help="语音文件路径")
     p_music.add_argument("--format", default="amr", choices=["amr", "wav", "mp3"], help="语音格式（默认 amr）")
     p_music.add_argument("--seconds", type=int, default=2, help="语音时长（秒，默认 2）")
+
+    p_music_card = sub.add_parser("send-music-card", help="发送微信音乐卡片（appmsg / type=3）")
+    p_music_card.add_argument("--to", required=True, help="接收人 wxid（群聊一般以 @chatroom 结尾）")
+    p_music_card.add_argument("--title", required=True, help="歌曲标题")
+    p_music_card.add_argument("--singer", default="", help="歌手/描述")
+    p_music_card.add_argument("--jump-url", default="", help="点击卡片后的跳转 URL")
+    p_music_card.add_argument("--music-url", required=True, help="音频直链 URL（dataurl / lowdataurl）")
+    p_music_card.add_argument("--cover-url", default="", help="封面 URL（songalbumurl）")
+    p_music_card.add_argument("--lyric", default="", help="歌词（可选）")
+    p_music_card.add_argument("--card-type", default="摇一摇搜歌", choices=["摇一摇搜歌", "原卡片"], help="卡片模板：摇一摇搜歌(默认) / 原卡片")
+    p_music_card.add_argument("--from-wxid", default="", help="可选：fromusername，通常填机器人 wxid")
 
     p_link = sub.add_parser("send-link", help="发送链接卡片（非文本）")
     p_link.add_argument("--to", required=True, help="接收人 wxid（群聊一般以 @chatroom 结尾）")
@@ -642,6 +756,22 @@ def main(argv: list[str]) -> int:
             seconds=int(args.seconds),
         )
         _print_result(annotate_voice_result(result))
+        return 0
+
+    if cmd == "send-music-card":
+        result = send_music_card(
+            cfg,
+            to_wxid=to_wxid,
+            title=str(args.title),
+            singer=str(args.singer),
+            jump_url=str(args.jump_url),
+            music_url=str(args.music_url),
+            cover_url=str(args.cover_url),
+            lyric=str(args.lyric),
+            card_type=str(args.card_type),
+            from_wxid=str(args.from_wxid),
+        )
+        _print_result(result)
         return 0
 
     if cmd == "send-link":
