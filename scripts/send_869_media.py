@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-@input: ~/.openclaw/credentials/wechat-869.json（baseUrl/key）；869 HTTP API（/message/*、/other/*）；可选 ffmpeg（用于从视频抽帧生成封面）；可选 pillow（用于将封面归一为 240x160 JPEG）；可选 sidecar 图片（与视频同目录的 jpg/png）
+@input: 当前用户目录下的 ~/.openclaw/credentials/wechat-869.json（baseUrl/key，可由 --config 覆盖）；869 HTTP API（/message/*、/other/*）；可选 ffmpeg（用于从视频抽帧生成封面）；可选 pillow（用于将封面归一为 240x160 JPEG）；可选 sidecar 图片（与视频同目录的 jpg/png）
 @output: CLI 脚本：发送图片/视频/语音/音乐卡片/链接/文件（附件），stdout 输出响应 JSON
 @position: OpenClaw skill wechat-869-media-sender 的可执行入口（非文本媒体发送）
 @auto-doc: Update header and folder INDEX.md when this file changes
@@ -42,7 +42,7 @@ except Exception:
 from xml.sax.saxutils import escape as xml_escape
 
 
-DEFAULT_CONFIG_PATH = Path("/home/sxkiss/.openclaw/credentials/wechat-869.json")
+DEFAULT_CONFIG_PATH = Path.home() / ".openclaw" / "credentials" / "wechat-869.json"
 
 
 @dataclass(frozen=True)

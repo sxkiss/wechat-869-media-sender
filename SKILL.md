@@ -1,6 +1,6 @@
 ---
 name: wechat-869-media-sender
-description: 通过 869 客户端发送微信消息（私聊/群聊）：纯文本、图片、视频、语音（音乐=语音）、链接、文件（附件）。语音支持 amr/wav/mp3；其中 wav/mp3 会在本地按 allbot 兼容方式转为 silk，单条最长 59 秒，超长自动分片顺序发送。从 ~/.openclaw/credentials 读取 869 服务地址与 key。
+description: 通过 869 客户端发送微信消息（私聊/群聊）：纯文本、图片、视频、语音（音乐=语音）、链接、文件（附件）。语音支持 amr/wav/mp3；其中 wav/mp3 会在本地按 allbot 兼容方式转为 silk，单条最长 59 秒，超长自动分片顺序发送。默认从当前用户目录下的 ~/.openclaw/credentials 读取 869 服务地址与 key，也可用 --config 覆盖。
 ---
 
 # wechat-869-media-sender
@@ -20,7 +20,7 @@ description: 通过 869 客户端发送微信消息（私聊/群聊）：纯文�
 - 必须配置 869 后端服务地址与 key（否则无法发送）。
 - skill 自带 `vendor/` 依赖目录，`send_869_media.py` 会优先从其中加载 `pydub` / `pysilk`，用于 `wav/mp3 -> silk` 本地转码。
 
-在 `".openclaw/credentials/wechat-869.json"` 配置 869 服务地址与 key：
+在 `"~/.openclaw/credentials/wechat-869.json"` 配置 869 服务地址与 key：
 
 ```json
 {
@@ -33,13 +33,13 @@ description: 通过 869 客户端发送微信消息（私聊/群聊）：纯文�
 
 脚本位置：
 
-- `".openclaw/skills/wechat-869-media-sender/scripts/send_869_text.py"`
-- `".openclaw/skills/wechat-869-media-sender/scripts/send_869_media.py"`
+- `"~/.openclaw/skills/wechat-869-media-sender/scripts/send_869_text.py"`
+- `"~/.openclaw/skills/wechat-869-media-sender/scripts/send_869_media.py"`
 
 ### 文本
 
 ```bash
-python3 ".openclaw/skills/wechat-869-media-sender/scripts/send_869_text.py" \
+python3 "~/.openclaw/skills/wechat-869-media-sender/scripts/send_869_text.py" \
   --to "sxkiss_com" \
   --text "今日复盘摘要"
 ```
@@ -47,7 +47,7 @@ python3 ".openclaw/skills/wechat-869-media-sender/scripts/send_869_text.py" \
 也可通过文件发送，避免 shell 转义问题：
 
 ```bash
-python3 ".openclaw/skills/wechat-869-media-sender/scripts/send_869_text.py" \
+python3 "~/.openclaw/skills/wechat-869-media-sender/scripts/send_869_text.py" \
   --to "sxkiss_com" \
   --text-file "/tmp/daily-review-summary.txt"
 ```
@@ -55,14 +55,14 @@ python3 ".openclaw/skills/wechat-869-media-sender/scripts/send_869_text.py" \
 ### 图片
 
 ```bash
-python3 ".openclaw/skills/wechat-869-media-sender/scripts/send_869_media.py" send-image --to "wxid_xxx" --path "/path/a.png"
+python3 "~/.openclaw/skills/wechat-869-media-sender/scripts/send_869_media.py" send-image --to "wxid_xxx" --path "/path/a.png"
 ```
 
 ### 视频（可选缩略图）
 
 ```bash
-python3 ".openclaw/skills/wechat-869-media-sender/scripts/send_869_media.py" send-video --to "xxx@chatroom" --path "/path/a.mp4"
-python3 ".openclaw/skills/wechat-869-media-sender/scripts/send_869_media.py" send-video --to "xxx@chatroom" --path "/path/a.mp4" --thumb "/path/t.png"
+python3 "~/.openclaw/skills/wechat-869-media-sender/scripts/send_869_media.py" send-video --to "xxx@chatroom" --path "/path/a.mp4"
+python3 "~/.openclaw/skills/wechat-869-media-sender/scripts/send_869_media.py" send-video --to "xxx@chatroom" --path "/path/a.mp4" --thumb "/path/t.png"
 ```
 
 未显式传 `--thumb` 时，脚本会按以下顺序选择封面：
@@ -77,9 +77,9 @@ python3 ".openclaw/skills/wechat-869-media-sender/scripts/send_869_media.py" sen
 ### 语音
 
 ```bash
-python3 ".openclaw/skills/wechat-869-media-sender/scripts/send_869_media.py" send-voice --to "wxid_xxx" --path "/path/a.amr" --format "amr" --seconds 3
-python3 ".openclaw/skills/wechat-869-media-sender/scripts/send_869_media.py" send-voice --to "wxid_xxx" --path "/path/a.mp3" --format "mp3" --seconds 59
-python3 ".openclaw/skills/wechat-869-media-sender/scripts/send_869_media.py" send-voice --to "wxid_xxx" --path "/path/a.wav" --format "wav" --seconds 59
+python3 "~/.openclaw/skills/wechat-869-media-sender/scripts/send_869_media.py" send-voice --to "wxid_xxx" --path "/path/a.amr" --format "amr" --seconds 3
+python3 "~/.openclaw/skills/wechat-869-media-sender/scripts/send_869_media.py" send-voice --to "wxid_xxx" --path "/path/a.mp3" --format "mp3" --seconds 59
+python3 "~/.openclaw/skills/wechat-869-media-sender/scripts/send_869_media.py" send-voice --to "wxid_xxx" --path "/path/a.wav" --format "wav" --seconds 59
 ```
 
 说明：
@@ -96,7 +96,7 @@ python3 ".openclaw/skills/wechat-869-media-sender/scripts/send_869_media.py" sen
 ### 音乐（等价语音）
 
 ```bash
-python3 ".openclaw/skills/wechat-869-media-sender/scripts/send_869_media.py" send-music --to "wxid_xxx" --path "/path/a.mp3" --format "mp3" --seconds 59
+python3 "~/.openclaw/skills/wechat-869-media-sender/scripts/send_869_media.py" send-music --to "wxid_xxx" --path "/path/a.mp3" --format "mp3" --seconds 59
 ```
 
 说明：`send-music` 只是 `send-voice` 的别名，走同一套本地转码/分片逻辑。
@@ -106,7 +106,7 @@ python3 ".openclaw/skills/wechat-869-media-sender/scripts/send_869_media.py" sen
 发送类似“摇一摇搜歌”或原生音乐分享格式的卡片。
 
 ```bash
-python3 ".openclaw/skills/wechat-869-media-sender/scripts/send_869_media.py" send-music-card \
+python3 "~/.openclaw/skills/wechat-869-media-sender/scripts/send_869_media.py" send-music-card \
   --to "wxid_xxx" \
   --title "晴天" \
   --singer "周杰伦" \
@@ -126,13 +126,13 @@ python3 ".openclaw/skills/wechat-869-media-sender/scripts/send_869_media.py" sen
 ### 链接
 
 ```bash
-python3 ".openclaw/skills/wechat-869-media-sender/scripts/send_869_media.py" send-link --to "wxid_xxx" --url "https://example.com" --title "标题" --desc "描述"
+python3 "~/.openclaw/skills/wechat-869-media-sender/scripts/send_869_media.py" send-link --to "wxid_xxx" --url "https://example.com" --title "标题" --desc "描述"
 ```
 
 ### 文件（附件）
 
 ```bash
-python3 ".openclaw/skills/wechat-869-media-sender/scripts/send_869_media.py" send-file --to "wxid_xxx" --path "/path/a.zip" --name "a.zip"
+python3 "~/.openclaw/skills/wechat-869-media-sender/scripts/send_869_media.py" send-file --to "wxid_xxx" --path "/path/a.zip" --name "a.zip"
 ```
 
 ## 备注
@@ -140,6 +140,7 @@ python3 ".openclaw/skills/wechat-869-media-sender/scripts/send_869_media.py" sen
 - 群聊 wxid 通常以 `@chatroom` 结尾；脚本不区分私聊/群聊，统一以 `--to` 传入。
 - 输出为 JSON（或可 JSON 化响应），便于在其他自动化里继续处理。
 - 文本脚本支持重复传入 `--at wxid_xxx`，会自动写入 `AtWxIDList`。
+- 默认配置文件路径按当前执行用户自动展开为 `~/.openclaw/credentials/wechat-869.json`；若你的配置文件已迁移，可显式传 `--config "/你的/新路径/wechat-869.json"`。
 - 语音/音乐返回会额外补充 `_derived.ok`：优先以 `newMsgId` 是否非 0 作为派生成功信号（保留 `ret` 供排查）。
 - 对于 `wav/mp3`，当前实现是 **本地转 silk 再调 869**；不依赖 allbot 中转。
 - 对于超长语音，返回结果可能是一个总 JSON，其中 `results` 数组包含每个分片的单独发送结果。

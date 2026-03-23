@@ -8,5 +8,5 @@
 
 | File | Role | Function |
 |------|------|----------|
-| send_869_text.py | Exec | 发送纯文本消息，支持直接传文本或从文件读取，并可附带 AtWxIDList |
-| send_869_media.py | Exec | 发送图片/视频/语音/链接/文件（“音乐”=语音别名）；支持 amr/wav/mp3，wav/mp3 本地转 silk，超长语音按 59 秒分片 |
+| send_869_text.py | Exec | 发送纯文本消息，默认读取当前用户配置，也支持直接传 `--config` 覆盖，并可附带 AtWxIDList |
+| send_869_media.py | Exec | 发送图片/视频/语音/链接/文件（“音乐”=语音别名）；默认读取当前用户配置，也支持直接传 `--config` 覆盖；支持 amr/wav/mp3，wav/mp3 本地转 silk，超长语音按 59 秒分片 |
