@@ -12,15 +12,32 @@ import argparse
 import base64
 from io import BytesIO
 import json
+import random
+import re
 import shutil
 import subprocess
 import sys
 import tempfile
+import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Optional
 from urllib.parse import urlencode, urlparse, urlunparse, parse_qsl
 from urllib.request import Request, urlopen
+
+VENDOR_DIR = Path(__file__).resolve().parent.parent / "vendor"
+if VENDOR_DIR.exists() and str(VENDOR_DIR) not in sys.path:
+    sys.path.insert(0, str(VENDOR_DIR))
+
+try:
+    from pydub import AudioSegment  # type: ignore
+except Exception:
+    AudioSegment = None  # type: ignore
+
+try:
+    import pysilk  # type: ignore
+except Exception:
+    pysilk = None  # type: ignore
 
 from xml.sax.saxutils import escape as xml_escape
 
@@ -40,6 +57,40 @@ def _stderr(msg: str) -> None:
 
 def _read_text(path: Path) -> str:
     return path.read_text(encoding="utf-8")
+
+
+def load_card_ids(pool_path: Path) -> list[str]:
+    raw = pool_path.read_text(encoding="utf-8", errors="replace")
+    ids: list[str] = []
+    for line in raw.splitlines():
+        s = line.strip()
+        if not s:
+            continue
+        ids.extend(re.findall(r'[A-Za-z0-9_\-]{8,}', s))
+    seen = set()
+    out: list[str] = []
+    for x in ids:
+        if x not in seen:
+            seen.add(x)
+            out.append(x)
+    return out
+
+
+def pick_random_card_id(pool_path: str) -> str:
+    p = Path(pool_path).expanduser()
+    if not p.exists():
+        raise FileNotFoundError(f"卡片 ID 池文件不存在：{p}")
+    ids = load_card_ids(p)
+    if not ids:
+        raise ValueError(f"卡片 ID 池文件未解析到可用 ID：{p}")
+    return random.choice(ids)
+
+
+def apply_card_id(value: str, card_id: str) -> str:
+    if not value:
+        return value
+    return value.replace('{card_id}', card_id).replace('{{card_id}}', card_id)
+
 
 
 def load_config(config_path: Path) -> ClientConfig:
@@ -374,18 +425,144 @@ def send_music_card(
     return send_app_message(cfg, to_wxid=to_wxid, content_xml=xml_payload, content_type=3)
 
 
+
+
+def send_app_card(cfg: ClientConfig, *, to_wxid: str, content_xml: str, content_type: int = 5) -> Any:
+    return send_app_message(cfg, to_wxid=to_wxid, content_xml=content_xml, content_type=content_type)
+
+
+MAX_VOICE_SECONDS = 59
+VOICE_CHUNK_PADDING_MS = 0
+VOICE_CHUNK_SEND_INTERVAL_SEC = 0.35
+
+
+def _get_closest_frame_rate(frame_rate: int) -> int:
+    supported = [8000, 12000, 16000, 24000]
+    return min(supported, key=lambda value: abs(value - frame_rate))
+
+
+def _load_audio_segment(voice_path: Path, fmt_normalized: str):
+    if AudioSegment is None:
+        raise RuntimeError("缺少 pydub 依赖，无法读取音频并进行分片")
+    return AudioSegment.from_file(str(voice_path), format=fmt_normalized).set_channels(1)
+
+
+def _slice_audio_segment(audio) -> list[Any]:
+    total_ms = len(audio)
+    chunk_ms = MAX_VOICE_SECONDS * 1000 - VOICE_CHUNK_PADDING_MS
+    if chunk_ms <= 0:
+        chunk_ms = MAX_VOICE_SECONDS * 1000
+    if total_ms <= MAX_VOICE_SECONDS * 1000:
+        return [audio]
+    chunks = []
+    for start in range(0, total_ms, chunk_ms):
+        chunks.append(audio[start:start + chunk_ms])
+    return chunks
+
+
+def _audio_chunk_to_silk_payload(audio_chunk) -> tuple[bytes, int, int]:
+    if pysilk is None:
+        raise RuntimeError("缺少 pysilk 依赖，无法按 allbot 方式把音频转为 silk")
+    normalized = audio_chunk.set_channels(1)
+    frame_rate = int(getattr(normalized, "frame_rate", 16000) or 16000)
+    normalized = normalized.set_frame_rate(_get_closest_frame_rate(frame_rate))
+    silk_bytes = pysilk.encode(normalized.raw_data, sample_rate=normalized.frame_rate)
+    derived_seconds = max(1, int((len(normalized) + 999) // 1000))
+    return silk_bytes, 4, min(MAX_VOICE_SECONDS, derived_seconds)
+
+
+def _prepare_voice_payloads(voice_path: Path, fmt: str, seconds: int) -> list[dict[str, Any]]:
+    fmt_normalized = (fmt or "amr").lower().strip()
+    if fmt_normalized not in {"amr", "wav", "mp3"}:
+        raise ValueError("语音格式仅支持 amr/wav/mp3")
+
+    if fmt_normalized == "amr":
+        try:
+            audio = _load_audio_segment(voice_path, fmt_normalized)
+        except Exception:
+            fallback_seconds = max(1, min(MAX_VOICE_SECONDS, int(seconds)))
+            return [{
+                "voice_bytes": read_bytes(voice_path),
+                "voice_format": 0,
+                "voice_seconds": fallback_seconds,
+                "wire_codec": "amr",
+            }]
+
+        actual_seconds = max(1, int((len(audio) + 999) // 1000))
+        if actual_seconds <= MAX_VOICE_SECONDS:
+            return [{
+                "voice_bytes": read_bytes(voice_path),
+                "voice_format": 0,
+                "voice_seconds": actual_seconds,
+                "wire_codec": "amr",
+            }]
+
+        payloads = []
+        for chunk in _slice_audio_segment(audio):
+            voice_bytes, voice_format, voice_seconds = _audio_chunk_to_silk_payload(chunk)
+            payloads.append({
+                "voice_bytes": voice_bytes,
+                "voice_format": voice_format,
+                "voice_seconds": voice_seconds,
+                "wire_codec": "silk",
+            })
+        return payloads
+
+    audio = _load_audio_segment(voice_path, fmt_normalized)
+    payloads = []
+    for chunk in _slice_audio_segment(audio):
+        voice_bytes, voice_format, voice_seconds = _audio_chunk_to_silk_payload(chunk)
+        payloads.append({
+            "voice_bytes": voice_bytes,
+            "voice_format": voice_format,
+            "voice_seconds": voice_seconds,
+            "wire_codec": "silk",
+        })
+    return payloads
+
+
 def send_voice(cfg: ClientConfig, *, to_wxid: str, voice_path: Path, fmt: str, seconds: int) -> Any:
-    voice_b64 = to_base64(read_bytes(voice_path))
-    fmt_map = {"amr": 0, "wav": 4, "mp3": 4}
-    voice_format = fmt_map.get((fmt or "amr").lower().strip(), 0)
-    payload = {
-        "ToUserName": to_wxid,
-        "VoiceData": voice_b64,
-        "VoiceFormat": int(voice_format),
-        "VoiceSecond": int(seconds),
-        "VoiceSecond,": int(seconds),
+    payloads = _prepare_voice_payloads(voice_path, fmt, seconds)
+    total_chunks = len(payloads)
+    results = []
+    for idx, item in enumerate(payloads, 1):
+        payload = {
+            "ToUserName": to_wxid,
+            "VoiceData": to_base64(item["voice_bytes"]),
+            "VoiceFormat": int(item["voice_format"]),
+            "VoiceSecond": int(item["voice_seconds"]),
+            "VoiceSecond,": int(item["voice_seconds"]),
+        }
+        result = request_869(cfg, method="POST", path="/message/SendVoice", body=payload)
+        if isinstance(result, dict):
+            merged = dict(result)
+            merged.setdefault("_derived", {})
+            if isinstance(merged["_derived"], dict):
+                merged["_derived"].update({
+                    "inputFormat": (fmt or "amr").lower().strip(),
+                    "wireFormat": int(item["voice_format"]),
+                    "wireCodec": str(item["wire_codec"]),
+                    "seconds": int(item["voice_seconds"]),
+                    "chunkIndex": idx,
+                    "totalChunks": total_chunks,
+                    "chunked": total_chunks > 1,
+                    "maxSecondsPerChunk": MAX_VOICE_SECONDS,
+                })
+            results.append(merged)
+        else:
+            results.append(result)
+        if idx < total_chunks:
+            time.sleep(VOICE_CHUNK_SEND_INTERVAL_SEC)
+
+    if total_chunks == 1:
+        return results[0]
+
+    return {
+        "chunked": True,
+        "totalChunks": total_chunks,
+        "maxSecondsPerChunk": MAX_VOICE_SECONDS,
+        "results": results,
     }
-    return request_869(cfg, method="POST", path="/message/SendVoice", body=payload)
 
 
 def _fallback_thumb_path() -> Path:
@@ -695,6 +872,7 @@ def build_parser() -> argparse.ArgumentParser:
     p_music.add_argument("--seconds", type=int, default=2, help="语音时长（秒，默认 2）")
 
     p_music_card = sub.add_parser("send-music-card", help="发送微信音乐卡片（appmsg / type=3）")
+    p_music_card.add_argument("--card-id-pool", default="", help="可选：卡片 ID 池文件路径；发送前随机抽取一个 ID，并替换 title/singer/jump-url/music-url/cover-url/lyric 中的 {card_id}")
     p_music_card.add_argument("--to", required=True, help="接收人 wxid（群聊一般以 @chatroom 结尾）")
     p_music_card.add_argument("--title", required=True, help="歌曲标题")
     p_music_card.add_argument("--singer", default="", help="歌手/描述")
@@ -705,7 +883,14 @@ def build_parser() -> argparse.ArgumentParser:
     p_music_card.add_argument("--card-type", default="摇一摇搜歌", choices=["摇一摇搜歌", "原卡片"], help="卡片模板：摇一摇搜歌(默认) / 原卡片")
     p_music_card.add_argument("--from-wxid", default="", help="可选：fromusername，通常填机器人 wxid")
 
+    p_app_card = sub.add_parser("send-app-card", help="发送自定义微信分享卡片/appmsg XML")
+    p_app_card.add_argument("--to", required=True, help="接收人 wxid（群聊一般以 @chatroom 结尾）")
+    p_app_card.add_argument("--xml", required=True, help="完整 appmsg XML 内容，可使用 {card_id} 占位符")
+    p_app_card.add_argument("--content-type", type=int, default=5, help="SendAppMessage contentType，默认 5")
+    p_app_card.add_argument("--card-id-pool", default="", help="可选：卡片 ID 池文件路径；发送前随机抽取一个 ID，并替换 XML 中的 {card_id}")
+
     p_link = sub.add_parser("send-link", help="发送链接卡片（非文本）")
+    p_link.add_argument("--card-id-pool", default="", help="可选：卡片 ID 池文件路径；发送前随机抽取一个 ID，并替换 title/desc/url/thumb-url 中的 {card_id}")
     p_link.add_argument("--to", required=True, help="接收人 wxid（群聊一般以 @chatroom 结尾）")
     p_link.add_argument("--url", required=True, help="链接 URL")
     p_link.add_argument("--title", default="", help="标题")
@@ -759,18 +944,35 @@ def main(argv: list[str]) -> int:
         return 0
 
     if cmd == "send-music-card":
+        picked_card_id = pick_random_card_id(str(args.card_id_pool)) if getattr(args, "card_id_pool", "") else ""
         result = send_music_card(
             cfg,
             to_wxid=to_wxid,
-            title=str(args.title),
-            singer=str(args.singer),
-            jump_url=str(args.jump_url),
-            music_url=str(args.music_url),
-            cover_url=str(args.cover_url),
-            lyric=str(args.lyric),
+            title=apply_card_id(str(args.title), picked_card_id),
+            singer=apply_card_id(str(args.singer), picked_card_id),
+            jump_url=apply_card_id(str(args.jump_url), picked_card_id),
+            music_url=apply_card_id(str(args.music_url), picked_card_id),
+            cover_url=apply_card_id(str(args.cover_url), picked_card_id),
+            lyric=apply_card_id(str(args.lyric), picked_card_id),
             card_type=str(args.card_type),
             from_wxid=str(args.from_wxid),
         )
+        if isinstance(result, dict) and picked_card_id:
+            result.setdefault("pickedCardId", picked_card_id)
+        _print_result(result)
+        return 0
+
+    if cmd == "send-app-card":
+        picked_card_id = pick_random_card_id(str(args.card_id_pool)) if getattr(args, "card_id_pool", "") else ""
+        xml_payload = apply_card_id(str(args.xml), picked_card_id)
+        result = send_app_card(
+            cfg,
+            to_wxid=to_wxid,
+            content_xml=xml_payload,
+            content_type=int(args.content_type),
+        )
+        if isinstance(result, dict) and picked_card_id:
+            result.setdefault("pickedCardId", picked_card_id)
         _print_result(result)
         return 0
 
